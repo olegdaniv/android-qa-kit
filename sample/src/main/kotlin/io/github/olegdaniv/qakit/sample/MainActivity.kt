@@ -10,15 +10,19 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import io.github.olegdaniv.qakit.core.logger.QaLogger
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        QaLogger.install(debugTree = true)
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Box(contentAlignment = Alignment.Center) {
                         Text("android-qa-kit sample")
+        QaLogger.d("Network", "GET /users → 200")
+        QaLogger.e("Auth", "Token expired", Throwable(message = "трабла"))
                     }
                 }
             }
