@@ -6,6 +6,22 @@ import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
+ * Тип зафіксованої проблеми.
+ *
+ * @property tag тег для [QaLogger], під яким дублюється запис.
+ */
+enum class ErrorKind(val tag: String) {
+    /** Оброблена помилка (catch-блок, ручний [GlobalErrorHandler.record]). */
+    HANDLED("Error"),
+
+    /** Неперехоплений виняток — app впав. */
+    CRASH("CRASH"),
+
+    /** Application Not Responding — головний потік заблоковано. */
+    ANR("ANR"),
+}
+
+/**
  * Зловлена помилка — зберігається в буфері та відображається в QA панелі.
  */
 data class ErrorEntry(
@@ -13,8 +29,11 @@ data class ErrorEntry(
     val stackTrace: String,
     val thread: String,
     val timestamp: Long = System.currentTimeMillis(),
-    val isCrash: Boolean = false,   // true = uncaught, app впав
-)
+    val kind: ErrorKind = ErrorKind.HANDLED,
+) {
+    /** Сумісність: true для fatal-крашу. */
+    val isCrash: Boolean get() = kind == ErrorKind.CRASH
+}
 
 /**
  * Глобальний перехоплювач помилок.
@@ -84,7 +103,7 @@ object GlobalErrorHandler {
             record(
                 throwable = throwable,
                 thread = thread.name,
-                isCrash = true,
+                kind = ErrorKind.CRASH,
             )
             if (rethrow) {
                 previousHandler?.uncaughtException(thread, throwable)
@@ -106,22 +125,28 @@ object GlobalErrorHandler {
     fun record(
         throwable: Throwable,
         thread: String = Thread.currentThread().name,
-        isCrash: Boolean = false,
+        kind: ErrorKind = ErrorKind.HANDLED,
     ) {
-        val entry = ErrorEntry(
-            message = throwable.message ?: throwable::class.simpleName ?: "Unknown error",
-            stackTrace = throwable.stackTraceToString(),
-            thread = thread,
-            isCrash = isCrash,
+        record(
+            ErrorEntry(
+                message = throwable.message ?: throwable::class.simpleName ?: "Unknown error",
+                stackTrace = throwable.stackTraceToString(),
+                thread = thread,
+                kind = kind,
+            ),
+            throwable = throwable,
         )
+    }
+
+    /**
+     * Записати вже сформований [ErrorEntry] — для джерел без [Throwable]
+     * (ANR-watchdog, [android.app.ApplicationExitInfo]).
+     */
+    fun record(entry: ErrorEntry, throwable: Throwable? = null) {
         add(entry)
 
         // Також пишемо в QaLogger щоб помилки були видні в загальному лог-буфері
-        QaLogger.e(
-            tag = if (isCrash) "CRASH" else "Error",
-            message = entry.message,
-            t = throwable,
-        )
+        QaLogger.e(tag = entry.kind.tag, message = entry.message, t = throwable)
     }
 
     /**

@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
                         onRecordError = ::recordError,
                         onNetworkRequest = ::makeNetworkRequest,
                         onOpenFragments = ::openFragmentDemo,
+                        onAnr = ::simulateAnr,
                         onCrash = ::simulateCrash,
                         paddingValues = paddingValues
                     )
@@ -100,6 +101,15 @@ class MainActivity : ComponentActivity() {
         startActivity(FragmentDemoActivity.intent(this))
     }
 
+    /** Блокує головний потік — watchdog зафіксує ANR. */
+    private fun simulateAnr() {
+        toast("Блокую main-потік на 8 с…")
+        try {
+            Thread.sleep(8_000)
+        } catch (_: InterruptedException) {
+        }
+    }
+
     /** Симулює неперехоплений виняток — GlobalErrorHandler його зафіксує. */
     private fun simulateCrash() {
         throw RuntimeException("Демо краш з android-qa-kit sample")
@@ -116,6 +126,7 @@ private fun SampleScreen(
     onRecordError: () -> Unit,
     onNetworkRequest: () -> Unit,
     onOpenFragments: () -> Unit,
+    onAnr: () -> Unit,
     onCrash: () -> Unit,
     paddingValues: PaddingValues,
 ) {
@@ -151,6 +162,9 @@ private fun SampleScreen(
         }
         Button(onClick = onOpenFragments, modifier = Modifier.fillMaxWidth()) {
             Text("Відкрити екран з фрагментами")
+        }
+        Button(onClick = onAnr, modifier = Modifier.fillMaxWidth()) {
+            Text("Симулювати ANR (блокує UI 8 с)")
         }
         Button(onClick = onRecordError, modifier = Modifier.fillMaxWidth()) {
             Text("Записати помилку (handled)")

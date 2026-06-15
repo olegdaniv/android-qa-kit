@@ -3,6 +3,10 @@ package io.github.olegdaniv.qakit.core
 import android.app.Application
 import android.content.Context
 import io.github.olegdaniv.qakit.core.QaKit.init
+import io.github.olegdaniv.qakit.core.anr.AnrWatchdog
+import io.github.olegdaniv.qakit.core.anr.ExitInfoCollector
+import io.github.olegdaniv.qakit.core.error.ErrorEntry
+import io.github.olegdaniv.qakit.core.error.ErrorKind
 import io.github.olegdaniv.qakit.core.error.GlobalErrorHandler
 import io.github.olegdaniv.qakit.core.lifecycle.ActivityLifecycleLogger
 import io.github.olegdaniv.qakit.core.logger.QaLogger
@@ -31,6 +35,21 @@ class QaKitConfig {
      * За замовч. true.
      */
     var persistErrors: Boolean = true
+
+    /**
+     * Live-детектор ANR (watchdog): фіксує зависання головного потоку наживо.
+     * За замовч. true.
+     */
+    var anrDetection: Boolean = true
+
+    /** Поріг блокування головного потоку (мс) для [anrDetection]. За замовч. 5000. */
+    var anrTimeoutMs: Long = 5_000L
+
+    /**
+     * Зчитувати справжні ANR / native-краші з [android.app.ApplicationExitInfo]
+     * при старті (API 30+). За замовч. true.
+     */
+    var collectExitInfo: Boolean = true
 
     /** Автоматично логувати lifecycle-події Activity. За замовч. true. */
     var lifecycleLogging: Boolean = true
@@ -138,6 +157,29 @@ object QaKit {
         GlobalErrorHandler.bufferSize = _config.errorBufferSize
         GlobalErrorHandler.install(context = application, persist = _config.persistErrors)
 
+        // ANR — live watchdog
+        if (_config.anrDetection) {
+            AnrWatchdog.timeoutMs = _config.anrTimeoutMs
+            AnrWatchdog.install { durationMs, mainThreadStack ->
+                GlobalErrorHandler.record(
+                    ErrorEntry(
+                        message = "ANR: головний потік заблоковано >${durationMs}мс",
+                        stackTrace = mainThreadStack,
+                        thread = "main",
+                        kind = ErrorKind.ANR,
+                    )
+                )
+            }
+        }
+
+        // ANR / native-краші з минулих сесій (ApplicationExitInfo, API 30+).
+        // Фоновий потік — читання трейсів з диску.
+        if (_config.collectExitInfo) {
+            Thread({
+                ExitInfoCollector.collect(application) { GlobalErrorHandler.record(it) }
+            }, "qa-exit-info").apply { isDaemon = true }.start()
+        }
+
         // Lifecycle logging
         if (_config.lifecycleLogging) {
             ActivityLifecycleLogger.install(
@@ -206,6 +248,7 @@ object QaKit {
      */
     fun uninstall() {
         ShakeDetector.uninstall()
+        AnrWatchdog.uninstall()
         _application?.let(ActivityLifecycleLogger::uninstall)
         _application = null
         isInitialized = false

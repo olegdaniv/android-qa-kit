@@ -56,7 +56,7 @@ internal class ErrorStore(private val file: File) {
         put(KEY_STACK, e.stackTrace)
         put(KEY_THREAD, e.thread)
         put(KEY_TIMESTAMP, e.timestamp)
-        put(KEY_CRASH, e.isCrash)
+        put(KEY_KIND, e.kind.name)
     }.toString()
 
     private fun fromJson(line: String): ErrorEntry? = runCatching {
@@ -66,15 +66,24 @@ internal class ErrorStore(private val file: File) {
             stackTrace = o.optString(KEY_STACK),
             thread = o.optString(KEY_THREAD),
             timestamp = o.optLong(KEY_TIMESTAMP, System.currentTimeMillis()),
-            isCrash = o.optBoolean(KEY_CRASH, false),
+            kind = parseKind(o),
         )
     }.getOrNull()
+
+    /** Розбір типу з новим полем [KEY_KIND] або старим boolean [KEY_CRASH]. */
+    private fun parseKind(o: JSONObject): ErrorKind = when {
+        o.has(KEY_KIND) -> runCatching { ErrorKind.valueOf(o.getString(KEY_KIND)) }
+            .getOrDefault(ErrorKind.HANDLED)
+        o.optBoolean(KEY_CRASH, false) -> ErrorKind.CRASH
+        else -> ErrorKind.HANDLED
+    }
 
     private companion object {
         const val KEY_MESSAGE = "m"
         const val KEY_STACK = "s"
         const val KEY_THREAD = "t"
         const val KEY_TIMESTAMP = "ts"
-        const val KEY_CRASH = "c"
+        const val KEY_KIND = "k"
+        const val KEY_CRASH = "c" // legacy
     }
 }

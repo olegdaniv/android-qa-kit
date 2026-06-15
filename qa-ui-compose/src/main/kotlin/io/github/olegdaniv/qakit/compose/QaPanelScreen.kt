@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.chuckerteam.chucker.api.Chucker
 import io.github.olegdaniv.qakit.core.QaKit
 import io.github.olegdaniv.qakit.core.error.ErrorEntry
+import io.github.olegdaniv.qakit.core.error.ErrorKind
 import io.github.olegdaniv.qakit.core.error.GlobalErrorHandler
 import io.github.olegdaniv.qakit.core.logger.LogEntry
 import io.github.olegdaniv.qakit.core.logger.LogLevel
@@ -161,11 +162,16 @@ private fun ErrorsTab() {
 
 @Composable
 private fun ErrorRow(entry: ErrorEntry) {
+    val (label, color) = when (entry.kind) {
+        ErrorKind.CRASH -> "💥 CRASH" to Color(0xFFD32F2F)
+        ErrorKind.ANR -> "🐢 ANR" to Color(0xFF7B1FA2)
+        ErrorKind.HANDLED -> "⚠️ Handled" to Color(0xFFF57C00)
+    }
     Card(Modifier.fillMaxWidth().padding(8.dp)) {
         Column(Modifier.padding(12.dp)) {
             Text(
-                text = if (entry.isCrash) "💥 CRASH" else "⚠️ Handled",
-                color = if (entry.isCrash) Color(0xFFD32F2F) else Color(0xFFF57C00),
+                text = label,
+                color = color,
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.labelLarge,
             )
