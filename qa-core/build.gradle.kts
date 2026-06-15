@@ -26,4 +26,5 @@ dependencies {
     api(libs.okhttp)
     api(libs.chucker)
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.fragment.ktx)
 }

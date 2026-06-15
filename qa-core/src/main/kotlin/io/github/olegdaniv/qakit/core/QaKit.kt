@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import io.github.olegdaniv.qakit.core.QaKit.init
 import io.github.olegdaniv.qakit.core.error.GlobalErrorHandler
+import io.github.olegdaniv.qakit.core.lifecycle.ActivityLifecycleLogger
 import io.github.olegdaniv.qakit.core.logger.QaLogger
 import io.github.olegdaniv.qakit.core.model.DeviceInfo
 import io.github.olegdaniv.qakit.core.network.NetworkInterceptorConfig
@@ -24,6 +25,21 @@ class QaKitConfig {
 
     /** Максимальна кількість помилок у буфері. */
     var errorBufferSize: Int = 100
+
+    /**
+     * Зберігати помилки на диск, щоб краш було видно після перезапуску процесу.
+     * За замовч. true.
+     */
+    var persistErrors: Boolean = true
+
+    /** Автоматично логувати lifecycle-події Activity. За замовч. true. */
+    var lifecycleLogging: Boolean = true
+
+    /**
+     * Логувати також Fragment lifecycle-події (для androidx FragmentActivity).
+     * Діє лише коли [lifecycleLogging] == true. За замовч. true.
+     */
+    var fragmentLifecycleLogging: Boolean = true
 
     /** Відкривати QA панель при shake. */
     var shakeToOpen: Boolean = true
@@ -74,6 +90,7 @@ class QaKitConfig {
 object QaKit {
 
     private var _config = QaKitConfig()
+    private var _application: Application? = null
     private var _deviceInfo: DeviceInfo? = null
     private var _networkInterceptor: Interceptor? = null
     private var panelOpener: ((Context) -> Unit)? = null
@@ -109,6 +126,7 @@ object QaKit {
         if (isInitialized) return
         isInitialized = true
 
+        _application = application
         _config = QaKitConfig().apply(block)
 
         // Logger
@@ -118,7 +136,15 @@ object QaKit {
 
         // Error handler
         GlobalErrorHandler.bufferSize = _config.errorBufferSize
-        GlobalErrorHandler.install()
+        GlobalErrorHandler.install(context = application, persist = _config.persistErrors)
+
+        // Lifecycle logging
+        if (_config.lifecycleLogging) {
+            ActivityLifecycleLogger.install(
+                application = application,
+                logFragments = _config.fragmentLifecycleLogging,
+            )
+        }
 
         // Device info
         _deviceInfo = DeviceInfo.collect(application)
@@ -180,6 +206,8 @@ object QaKit {
      */
     fun uninstall() {
         ShakeDetector.uninstall()
+        _application?.let(ActivityLifecycleLogger::uninstall)
+        _application = null
         isInitialized = false
     }
 }

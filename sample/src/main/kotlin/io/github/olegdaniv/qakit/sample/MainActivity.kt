@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
                         onEmitLog = ::emitLog,
                         onRecordError = ::recordError,
                         onNetworkRequest = ::makeNetworkRequest,
+                        onOpenFragments = ::openFragmentDemo,
                         onCrash = ::simulateCrash,
                         paddingValues = paddingValues
                     )
@@ -94,6 +95,11 @@ class MainActivity : ComponentActivity() {
         toast("Запит надіслано — дивись Chucker")
     }
 
+    /** Відкриває демо-екран на Fragment'ах — для перевірки Fragment lifecycle-логів. */
+    private fun openFragmentDemo() {
+        startActivity(FragmentDemoActivity.intent(this))
+    }
+
     /** Симулює неперехоплений виняток — GlobalErrorHandler його зафіксує. */
     private fun simulateCrash() {
         throw RuntimeException("Демо краш з android-qa-kit sample")
@@ -109,6 +115,7 @@ private fun SampleScreen(
     onEmitLog: () -> Unit,
     onRecordError: () -> Unit,
     onNetworkRequest: () -> Unit,
+    onOpenFragments: () -> Unit,
     onCrash: () -> Unit,
     paddingValues: PaddingValues,
 ) {
@@ -141,6 +148,9 @@ private fun SampleScreen(
         }
         Button(onClick = onNetworkRequest, modifier = Modifier.fillMaxWidth()) {
             Text("Мережевий запит")
+        }
+        Button(onClick = onOpenFragments, modifier = Modifier.fillMaxWidth()) {
+            Text("Відкрити екран з фрагментами")
         }
         Button(onClick = onRecordError, modifier = Modifier.fillMaxWidth()) {
             Text("Записати помилку (handled)")

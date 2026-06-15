@@ -1,8 +1,8 @@
 package io.github.olegdaniv.qakit.core.error
 
-import io.github.olegdaniv.qakit.core.logger.LogLevel
-import io.github.olegdaniv.qakit.core.logger.LogEntry
+import android.content.Context
 import io.github.olegdaniv.qakit.core.logger.QaLogger
+import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -23,10 +23,13 @@ data class ErrorEntry(
  * - [Thread.UncaughtExceptionHandler] — fatal crash (app зупиняється)
  * - Ручний виклик [record] — handled exceptions (наприклад в catch-блоці)
  *
+ * Помилки персистяться на диск (JSONL), тож **краш видно після перезапуску
+ * процесу** — запис відбувається синхронно в момент крашу.
+ *
  * Використання:
  * ```kotlin
  * // Application.onCreate()
- * GlobalErrorHandler.install()
+ * GlobalErrorHandler.install(context)
  *
  * // В catch-блоці (non-fatal)
  * GlobalErrorHandler.record(exception)
@@ -51,16 +54,29 @@ object GlobalErrorHandler {
     private var previousHandler: Thread.UncaughtExceptionHandler? = null
     private var isInstalled = false
 
+    /** Файлове сховище. null = персистентність вимкнена (тільки в пам'яті). */
+    private var store: ErrorStore? = null
+
     /**
      * Встановлює глобальний обробник.
      * Викликати один раз в [android.app.Application.onCreate].
      *
+     * @param context контекст застосунку — потрібен для персистентності помилок.
      * @param rethrow якщо true — після запису передає crash далі
      *                системному обробнику (app все одно впаде, але зафіксується).
+     * @param persist якщо true — помилки зберігаються на диск і переживають
+     *                перезапуск процесу (краш видно при наступному старті).
      */
-    fun install(rethrow: Boolean = true) {
+    fun install(context: Context, rethrow: Boolean = true, persist: Boolean = true) {
         if (isInstalled) return
         isInstalled = true
+
+        if (persist) {
+            store = ErrorStore(File(context.applicationContext.filesDir, STORE_PATH)).also { s ->
+                // Підвантажуємо помилки з минулих сесій (включно з крашами).
+                _entries.addAll(s.load(bufferSize))
+            }
+        }
 
         previousHandler = Thread.getDefaultUncaughtExceptionHandler()
 
@@ -122,16 +138,32 @@ object GlobalErrorHandler {
         listeners.remove(listener)
     }
 
-    /** Очистити буфер (кнопка "Clear errors" в QA панелі). */
-    fun clear() = _entries.clear()
+    /** Очистити буфер і файлове сховище (кнопка "Clear errors" в QA панелі). */
+    fun clear() {
+        _entries.clear()
+        store?.clear()
+    }
 
     // --- Internal ---
 
     private fun add(entry: ErrorEntry) {
-        if (_entries.size >= bufferSize) {
-            _entries.removeFirstOrNull()
-        }
+        val trimmed = _entries.size >= bufferSize
+        if (trimmed) _entries.removeFirstOrNull()
         _entries.add(entry)
+        persist(trimmed)
         listeners.forEach { it(entry) }
     }
+
+    private fun persist(trimmed: Boolean) {
+        val s = store ?: return
+        // Якщо буфер не витіснявся і файл не розрісся — швидкий append останнього.
+        // Інакше компактимо: перезаписуємо файл поточним набором.
+        if (!trimmed && s.lineCount() < bufferSize * 2) {
+            s.append(_entries.last())
+        } else {
+            s.rewrite(_entries)
+        }
+    }
+
+    private const val STORE_PATH = "qa-kit/errors.jsonl"
 }

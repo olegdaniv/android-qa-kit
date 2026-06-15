@@ -38,6 +38,7 @@ dependencies {
     // Завжди доступна логіка (QaKit, QaLogger, DeviceInfo, ...)
     implementation(project(":qa-core"))
     implementation(libs.okhttp)
+    implementation(libs.androidx.fragment.ktx)
 
     // Debug — повна бібліотека (UI панель)
     debugImplementation(project(":qa-ui-compose"))
