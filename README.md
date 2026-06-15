@@ -10,14 +10,17 @@ In-app QA & debug toolkit for Android — logger, UI inspector, network monitor,
 
 ## ✨ Features
 
-| Feature | Module |
-|---|---|
-| 📝 Logger (Timber wrapper) | `qa-core` |
-| 📱 QA Helper Screen (version, device, memory) | `qa-ui-compose` / `qa-ui-view` |
-| 🔍 UI Inspector (tap → sizes, colors, fonts) | `qa-ui-compose` / `qa-ui-view` |
-| 🌐 Network monitor (OkHttp interceptor) | `qa-core` |
-| 💥 Exception Snackbar (auto error display) | `qa-ui-compose` / `qa-ui-view` |
-| 📳 Shake to open | `qa-core` |
+| Feature | Module | Status |
+|---|---|---|
+| 📝 Logger (Timber wrapper) + Logs viewer | `qa-core` / `qa-ui-compose` | ✅ |
+| ♻️ Lifecycle logging (Activity + Fragment) | `qa-core` | ✅ |
+| 🌐 Network monitor (OkHttp interceptor, Chucker) | `qa-core` | ✅ |
+| 📱 Device info / app version / memory | `qa-core` / `qa-ui-compose` | ✅ |
+| 💥 Error collection — handled + crashes (persisted across restarts) | `qa-core` | ✅ |
+| 🐢 ANR detection (live watchdog + `ApplicationExitInfo`) | `qa-core` | ✅ |
+| 📊 Performance metrics (jank, memory, startup) with Android vitals ratings | `qa-core` / `qa-ui-compose` | ✅ |
+| 📳 Shake to open | `qa-core` | ✅ |
+| 🔍 UI Inspector (tap → sizes, colors, fonts) | `qa-ui-compose` / `qa-ui-view` | 🚧 planned |
 
 ## 🚀 Integration
 
@@ -54,11 +57,32 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         QaKit.init(this) {
-            shakeToOpen = true
-            sentryDsn = BuildConfig.SENTRY_DSN
+            shakeToOpen           = true   // open QA panel on shake
+            lifecycleLogging      = true   // log Activity + Fragment lifecycle
+            persistErrors         = true   // crashes survive process restart
+            anrDetection          = true   // live ANR watchdog
+            collectExitInfo       = true   // real ANR / native crash (API 30+)
+            performanceMonitoring = true   // jank / memory / startup metrics
+            networkConfig         = NetworkInterceptorConfig(
+                headersToRedact = setOf("Authorization", "X-Api-Key"),
+            )
         }
     }
 }
+```
+
+Attach the network interceptor to your OkHttp client:
+
+```kotlin
+val client = OkHttpClient.Builder()
+    .apply { QaKit.networkInterceptor?.let { addInterceptor(it) } }
+    .build()
+```
+
+Open the panel from code (no-op in release):
+
+```kotlin
+QaKit.openPanel(context)
 ```
 
 ## 📄 License

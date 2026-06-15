@@ -1,9 +1,17 @@
 package io.github.olegdaniv.qakit.core
 
 import android.app.Application
+import android.content.Context
 import io.github.olegdaniv.qakit.core.QaKit.init
+import io.github.olegdaniv.qakit.core.anr.AnrWatchdog
+import io.github.olegdaniv.qakit.core.anr.ExitInfoCollector
+import io.github.olegdaniv.qakit.core.error.ErrorEntry
+import io.github.olegdaniv.qakit.core.error.ErrorKind
 import io.github.olegdaniv.qakit.core.error.GlobalErrorHandler
+import io.github.olegdaniv.qakit.core.lifecycle.ActivityLifecycleLogger
 import io.github.olegdaniv.qakit.core.logger.QaLogger
+import io.github.olegdaniv.qakit.core.perf.PerformanceMonitor
+import io.github.olegdaniv.qakit.core.perf.PerfThresholds
 import io.github.olegdaniv.qakit.core.model.DeviceInfo
 import io.github.olegdaniv.qakit.core.network.NetworkInterceptorConfig
 import io.github.olegdaniv.qakit.core.network.QaNetworkInterceptor
@@ -23,6 +31,48 @@ class QaKitConfig {
 
     /** Максимальна кількість помилок у буфері. */
     var errorBufferSize: Int = 100
+
+    /**
+     * Зберігати помилки на диск, щоб краш було видно після перезапуску процесу.
+     * За замовч. true.
+     */
+    var persistErrors: Boolean = true
+
+    /**
+     * Live-детектор ANR (watchdog): фіксує зависання головного потоку наживо.
+     * За замовч. true.
+     */
+    var anrDetection: Boolean = true
+
+    /** Поріг блокування головного потоку (мс) для [anrDetection]. За замовч. 5000. */
+    var anrTimeoutMs: Long = 5_000L
+
+    /**
+     * Зчитувати справжні ANR / native-краші з [android.app.ApplicationExitInfo]
+     * при старті (API 30+). За замовч. true.
+     */
+    var collectExitInfo: Boolean = true
+
+    /**
+     * Збирати метрики продуктивності (jank/кадри, пам'ять, час старту).
+     * За замовч. true.
+     */
+    var performanceMonitoring: Boolean = true
+
+    /**
+     * Пороги «здоров'я» метрик продуктивності (рейтинг GOOD/WARNING/BAD у табі Perf).
+     * Дефолти — за Android vitals; можна перевизначити.
+     */
+    var perfThresholds: PerfThresholds = PerfThresholds()
+
+    /** Автоматично логувати lifecycle-події Activity. За замовч. true. */
+    var lifecycleLogging: Boolean = true
+
+    /**
+     * Логувати також Fragment lifecycle-події (для androidx FragmentActivity).
+     * Діє лише коли [lifecycleLogging] == true. За замовч. true.
+     */
+    var fragmentLifecycleLogging: Boolean = true
 
     /** Відкривати QA панель при shake. */
     var shakeToOpen: Boolean = true
@@ -73,9 +123,14 @@ class QaKitConfig {
 object QaKit {
 
     private var _config = QaKitConfig()
+    private var _application: Application? = null
     private var _deviceInfo: DeviceInfo? = null
     private var _networkInterceptor: Interceptor? = null
+    private var panelOpener: ((Context) -> Unit)? = null
     private var isInitialized = false
+
+    /** True якщо UI-шар (qa-ui-compose / qa-ui-view) зареєстрував відкриття панелі. */
+    val isPanelAvailable: Boolean get() = panelOpener != null
 
     /** Поточна конфігурація. */
     val config: QaKitConfig get() = _config
@@ -104,6 +159,7 @@ object QaKit {
         if (isInitialized) return
         isInitialized = true
 
+        _application = application
         _config = QaKitConfig().apply(block)
 
         // Logger
@@ -113,7 +169,44 @@ object QaKit {
 
         // Error handler
         GlobalErrorHandler.bufferSize = _config.errorBufferSize
-        GlobalErrorHandler.install()
+        GlobalErrorHandler.install(context = application, persist = _config.persistErrors)
+
+        // ANR — live watchdog
+        if (_config.anrDetection) {
+            AnrWatchdog.timeoutMs = _config.anrTimeoutMs
+            AnrWatchdog.install { durationMs, mainThreadStack ->
+                GlobalErrorHandler.record(
+                    ErrorEntry(
+                        message = "ANR: головний потік заблоковано >${durationMs}мс",
+                        stackTrace = mainThreadStack,
+                        thread = "main",
+                        kind = ErrorKind.ANR,
+                    )
+                )
+            }
+        }
+
+        // ANR / native-краші з минулих сесій (ApplicationExitInfo, API 30+).
+        // Фоновий потік — читання трейсів з диску.
+        if (_config.collectExitInfo) {
+            Thread({
+                ExitInfoCollector.collect(application) { GlobalErrorHandler.record(it) }
+            }, "qa-exit-info").apply { isDaemon = true }.start()
+        }
+
+        // Lifecycle logging
+        if (_config.lifecycleLogging) {
+            ActivityLifecycleLogger.install(
+                application = application,
+                logFragments = _config.fragmentLifecycleLogging,
+            )
+        }
+
+        // Performance metrics (jank/кадри, пам'ять, час старту)
+        if (_config.performanceMonitoring) {
+            PerformanceMonitor.thresholds = _config.perfThresholds
+            PerformanceMonitor.install(application)
+        }
 
         // Device info
         _deviceInfo = DeviceInfo.collect(application)
@@ -123,11 +216,11 @@ object QaKit {
             QaNetworkInterceptor.create(application, it)
         }
 
-        // Shake
+        // Shake — за замовчуванням відкриває QA панель, якщо UI-шар підключений
         if (_config.shakeToOpen) {
             ShakeDetector.sensitivity = _config.shakeSensitivity
             ShakeDetector.install(application) {
-                _config.onShake?.invoke()
+                _config.onShake?.invoke() ?: openPanel(application)
             }
         }
 
@@ -149,11 +242,36 @@ object QaKit {
     }
 
     /**
+     * Реєструє спосіб відкриття QA панелі. Викликається автоматично UI-шаром
+     * (qa-ui-compose / qa-ui-view) при старті застосунку. У release (qa-no-op)
+     * нічого не реєструється — [openPanel] стає no-op.
+     */
+    fun registerPanelOpener(block: (Context) -> Unit) {
+        panelOpener = block
+    }
+
+    /**
+     * Відкриває QA панель. Безпечно викликати з будь-якого білда:
+     * у release (без UI-шару) просто нічого не відбувається.
+     *
+     * ```kotlin
+     * Button(onClick = { QaKit.openPanel(context) }) { Text("QA Panel") }
+     * ```
+     */
+    fun openPanel(context: Context) {
+        panelOpener?.invoke(context)
+    }
+
+    /**
      * Зупиняє shake детектор.
      * Корисно наприклад для release builds через no-op.
      */
     fun uninstall() {
         ShakeDetector.uninstall()
+        AnrWatchdog.uninstall()
+        PerformanceMonitor.uninstall()
+        _application?.let(ActivityLifecycleLogger::uninstall)
+        _application = null
         isInitialized = false
     }
 }

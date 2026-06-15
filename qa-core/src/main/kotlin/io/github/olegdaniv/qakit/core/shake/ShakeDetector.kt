@@ -54,7 +54,9 @@ object ShakeDetector {
 
         detector = SeismicDetector { onShake() }.also { sd ->
             sd.setSensitivity(sensitivity.value)
-            sd.start(sensorManager)
+            // SENSOR_DELAY_GAME (~50 Гц), а не дефолтний FASTEST (0 µs) —
+            // інакше Android 12+ вимагає дозвіл HIGH_SAMPLING_RATE_SENSORS.
+            sd.start(sensorManager, SensorManager.SENSOR_DELAY_GAME)
         }
     }
 
