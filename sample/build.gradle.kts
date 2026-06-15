@@ -40,9 +40,9 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.androidx.fragment.ktx)
 
-    // Debug — повна бібліотека (UI панель)
+    // Debug — повна бібліотека (UI панель). Це Compose-демо → qa-ui-compose.
+    // Для legacy/View-застосунків замість нього підключають qa-ui-view.
     debugImplementation(project(":qa-ui-compose"))
-    debugImplementation(project(":qa-ui-view"))
 
     // Release — порожні стаби, нуль оверхеду
     releaseImplementation(project(":qa-no-op"))
