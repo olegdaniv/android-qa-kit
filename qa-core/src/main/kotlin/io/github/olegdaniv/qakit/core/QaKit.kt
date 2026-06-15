@@ -1,6 +1,7 @@
 package io.github.olegdaniv.qakit.core
 
 import android.app.Application
+import android.content.Context
 import io.github.olegdaniv.qakit.core.QaKit.init
 import io.github.olegdaniv.qakit.core.error.GlobalErrorHandler
 import io.github.olegdaniv.qakit.core.logger.QaLogger
@@ -75,7 +76,11 @@ object QaKit {
     private var _config = QaKitConfig()
     private var _deviceInfo: DeviceInfo? = null
     private var _networkInterceptor: Interceptor? = null
+    private var panelOpener: ((Context) -> Unit)? = null
     private var isInitialized = false
+
+    /** True якщо UI-шар (qa-ui-compose / qa-ui-view) зареєстрував відкриття панелі. */
+    val isPanelAvailable: Boolean get() = panelOpener != null
 
     /** Поточна конфігурація. */
     val config: QaKitConfig get() = _config
@@ -123,11 +128,11 @@ object QaKit {
             QaNetworkInterceptor.create(application, it)
         }
 
-        // Shake
+        // Shake — за замовчуванням відкриває QA панель, якщо UI-шар підключений
         if (_config.shakeToOpen) {
             ShakeDetector.sensitivity = _config.shakeSensitivity
             ShakeDetector.install(application) {
-                _config.onShake?.invoke()
+                _config.onShake?.invoke() ?: openPanel(application)
             }
         }
 
@@ -146,6 +151,27 @@ object QaKit {
      */
     fun onShake(block: () -> Unit) {
         _config.onShake = block
+    }
+
+    /**
+     * Реєструє спосіб відкриття QA панелі. Викликається автоматично UI-шаром
+     * (qa-ui-compose / qa-ui-view) при старті застосунку. У release (qa-no-op)
+     * нічого не реєструється — [openPanel] стає no-op.
+     */
+    fun registerPanelOpener(block: (Context) -> Unit) {
+        panelOpener = block
+    }
+
+    /**
+     * Відкриває QA панель. Безпечно викликати з будь-якого білда:
+     * у release (без UI-шару) просто нічого не відбувається.
+     *
+     * ```kotlin
+     * Button(onClick = { QaKit.openPanel(context) }) { Text("QA Panel") }
+     * ```
+     */
+    fun openPanel(context: Context) {
+        panelOpener?.invoke(context)
     }
 
     /**
