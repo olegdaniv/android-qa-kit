@@ -1,6 +1,8 @@
 package io.github.olegdaniv.qakit.sample
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -48,6 +50,7 @@ class MainActivity : ComponentActivity() {
                         onRecordError = ::recordError,
                         onNetworkRequest = ::makeNetworkRequest,
                         onOpenFragments = ::openFragmentDemo,
+                        onJank = ::generateJank,
                         onAnr = ::simulateAnr,
                         onCrash = ::simulateCrash,
                         paddingValues = paddingValues
@@ -101,6 +104,19 @@ class MainActivity : ComponentActivity() {
         startActivity(FragmentDemoActivity.intent(this))
     }
 
+    /** Серія коротких стелів main-потоку — створює janky-кадри (таб Perf). */
+    private fun generateJank() {
+        val handler = Handler(Looper.getMainLooper())
+        repeat(20) { i ->
+            handler.postDelayed({
+                val end = System.currentTimeMillis() + 70
+                @Suppress("ControlFlowWithEmptyBody")
+                while (System.currentTimeMillis() < end) { /* навантаження main */ }
+            }, i * 100L)
+        }
+        toast("Генерую jank ~2 с — гортай і дивись Perf")
+    }
+
     /** Блокує головний потік — watchdog зафіксує ANR. */
     private fun simulateAnr() {
         toast("Блокую main-потік на 8 с…")
@@ -126,6 +142,7 @@ private fun SampleScreen(
     onRecordError: () -> Unit,
     onNetworkRequest: () -> Unit,
     onOpenFragments: () -> Unit,
+    onJank: () -> Unit,
     onAnr: () -> Unit,
     onCrash: () -> Unit,
     paddingValues: PaddingValues,
@@ -162,6 +179,9 @@ private fun SampleScreen(
         }
         Button(onClick = onOpenFragments, modifier = Modifier.fillMaxWidth()) {
             Text("Відкрити екран з фрагментами")
+        }
+        Button(onClick = onJank, modifier = Modifier.fillMaxWidth()) {
+            Text("Згенерувати jank")
         }
         Button(onClick = onAnr, modifier = Modifier.fillMaxWidth()) {
             Text("Симулювати ANR (блокує UI 8 с)")

@@ -10,6 +10,8 @@ import io.github.olegdaniv.qakit.core.error.ErrorKind
 import io.github.olegdaniv.qakit.core.error.GlobalErrorHandler
 import io.github.olegdaniv.qakit.core.lifecycle.ActivityLifecycleLogger
 import io.github.olegdaniv.qakit.core.logger.QaLogger
+import io.github.olegdaniv.qakit.core.perf.PerformanceMonitor
+import io.github.olegdaniv.qakit.core.perf.PerfThresholds
 import io.github.olegdaniv.qakit.core.model.DeviceInfo
 import io.github.olegdaniv.qakit.core.network.NetworkInterceptorConfig
 import io.github.olegdaniv.qakit.core.network.QaNetworkInterceptor
@@ -50,6 +52,18 @@ class QaKitConfig {
      * при старті (API 30+). За замовч. true.
      */
     var collectExitInfo: Boolean = true
+
+    /**
+     * Збирати метрики продуктивності (jank/кадри, пам'ять, час старту).
+     * За замовч. true.
+     */
+    var performanceMonitoring: Boolean = true
+
+    /**
+     * Пороги «здоров'я» метрик продуктивності (рейтинг GOOD/WARNING/BAD у табі Perf).
+     * Дефолти — за Android vitals; можна перевизначити.
+     */
+    var perfThresholds: PerfThresholds = PerfThresholds()
 
     /** Автоматично логувати lifecycle-події Activity. За замовч. true. */
     var lifecycleLogging: Boolean = true
@@ -188,6 +202,12 @@ object QaKit {
             )
         }
 
+        // Performance metrics (jank/кадри, пам'ять, час старту)
+        if (_config.performanceMonitoring) {
+            PerformanceMonitor.thresholds = _config.perfThresholds
+            PerformanceMonitor.install(application)
+        }
+
         // Device info
         _deviceInfo = DeviceInfo.collect(application)
 
@@ -249,6 +269,7 @@ object QaKit {
     fun uninstall() {
         ShakeDetector.uninstall()
         AnrWatchdog.uninstall()
+        PerformanceMonitor.uninstall()
         _application?.let(ActivityLifecycleLogger::uninstall)
         _application = null
         isInitialized = false

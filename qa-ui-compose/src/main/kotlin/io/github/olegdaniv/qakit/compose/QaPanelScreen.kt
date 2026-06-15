@@ -1,6 +1,7 @@
 package io.github.olegdaniv.qakit.compose
 
 import android.content.Intent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,10 +29,12 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -45,8 +48,11 @@ import io.github.olegdaniv.qakit.core.error.GlobalErrorHandler
 import io.github.olegdaniv.qakit.core.logger.LogEntry
 import io.github.olegdaniv.qakit.core.logger.LogLevel
 import io.github.olegdaniv.qakit.core.logger.QaLogger
+import io.github.olegdaniv.qakit.core.perf.PerfRating
+import io.github.olegdaniv.qakit.core.perf.PerformanceMonitor
+import io.github.olegdaniv.qakit.core.perf.PerformanceSnapshot
 
-private val TABS = listOf("Logs", "Errors", "Device", "Network")
+private val TABS = listOf("Logs", "Errors", "Device", "Network", "Perf")
 
 /**
  * Головний екран QA панелі з табами Logs / Errors / Device / Network.
@@ -80,7 +86,8 @@ fun QaPanelScreen(onClose: () -> Unit) {
                 0 -> LogsTab()
                 1 -> ErrorsTab()
                 2 -> DeviceTab()
-                else -> NetworkTab()
+                3 -> NetworkTab()
+                else -> PerfTab()
             }
         }
     }
@@ -215,12 +222,23 @@ private fun DeviceTab() {
 }
 
 @Composable
-private fun InfoRow(label: String, value: String) {
+private fun InfoRow(label: String, value: String, rating: PerfRating? = null) {
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Text(label, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-        Text(value, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = if (rating != null) "$value  ● ${rating.name}" else value,
+            color = rating?.color() ?: MaterialTheme.colorScheme.onSurface,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodyMedium,
+        )
         HorizontalDivider(Modifier.padding(top = 6.dp))
     }
+}
+
+private fun PerfRating.color(): Color = when (this) {
+    PerfRating.GOOD -> Color(0xFF388E3C)
+    PerfRating.WARNING -> Color(0xFFF57C00)
+    PerfRating.BAD -> Color(0xFFD32F2F)
 }
 
 @Composable
@@ -242,6 +260,97 @@ private fun NetworkTab() {
             Text("Відкрити Chucker")
         }
     }
+}
+
+@Composable
+private fun PerfTab() {
+    var snap by remember { mutableStateOf(PerformanceMonitor.snapshot()) }
+    DisposableEffect(Unit) {
+        val listener: (PerformanceSnapshot) -> Unit = { snap = it }
+        PerformanceMonitor.addListener(listener)
+        onDispose { PerformanceMonitor.removeListener(listener) }
+    }
+
+    LazyColumn(Modifier.fillMaxSize().padding(16.dp)) {
+        item {
+            Text("Старт", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleSmall)
+            HorizontalDivider(Modifier.padding(vertical = 6.dp))
+        }
+        item {
+            InfoRow("Cold start (process → init)", "${snap.coldStartMs} ms", snap.coldStartRating)
+        }
+        item {
+            InfoRow(
+                "Time to first frame",
+                snap.timeToFirstFrameMs?.let { "$it ms" } ?: "вимірюється…",
+                snap.ttfRating,
+            )
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+            Text("Кадри / Jank", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleSmall)
+            HorizontalDivider(Modifier.padding(vertical = 6.dp))
+        }
+        item { InfoRow("Оброблено кадрів", snap.framesTracked.toString()) }
+        item {
+            InfoRow(
+                "Janky кадрів",
+                "${snap.jankyFrames} (${"%.1f".format(snap.jankPercent)}%)",
+                snap.jankRating,
+            )
+        }
+        item {
+            InfoRow("Найдовший кадр", "${"%.1f".format(snap.worstFrameMs)} ms", snap.worstFrameRating)
+        }
+        item {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+                OutlinedButton(onClick = { PerformanceMonitor.reset() }) { Text("Reset jank") }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+            Text("Пам'ять", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleSmall)
+            HorizontalDivider(Modifier.padding(vertical = 6.dp))
+        }
+        item {
+            InfoRow("Java heap", "${snap.usedHeapMb} MB / ${snap.maxHeapMb} MB", snap.heapRating)
+        }
+        item { InfoRow("Пік Java heap", "${snap.peakUsedHeapMb} MB") }
+        item { InfoRow("Native heap", "${snap.nativeHeapMb} MB") }
+        item {
+            Spacer(Modifier.height(8.dp))
+            MemorySparkline(snap.memoryHistoryMb, snap.maxHeapMb)
+        }
+    }
+}
+
+@Composable
+private fun MemorySparkline(history: List<Long>, maxHeapMb: Long) {
+    if (history.isEmpty()) return
+    val peak = (history.maxOrNull() ?: 1L).coerceAtLeast(1L)
+    val lineColor = MaterialTheme.colorScheme.primary
+    Canvas(Modifier.fillMaxWidth().height(64.dp)) {
+        val n = history.size
+        if (n < 2) return@Canvas
+        val stepX = size.width / (n - 1)
+        val points = history.mapIndexed { i, v ->
+            Offset(i * stepX, size.height * (1f - v.toFloat() / peak))
+        }
+        for (i in 0 until points.size - 1) {
+            drawLine(
+                color = lineColor,
+                start = points[i],
+                end = points[i + 1],
+                strokeWidth = 3f,
+            )
+        }
+    }
+    Text(
+        "used-heap, останні ${history.size} семплів (пік ${peak} MB)",
+        style = MaterialTheme.typography.labelSmall,
+    )
 }
 
 @Composable
